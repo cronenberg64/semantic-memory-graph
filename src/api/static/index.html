@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Semantic Memory Graph</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        body { font-family: sans-serif; margin: 0; overflow: hidden; background-color: #1a1a1a; color: #eee; }
+        #graph { width: 100vw; height: 100vh; }
+        .controls { position: absolute; top: 10px; left: 10px; background: rgba(0,0,0,0.7); padding: 10px; border-radius: 5px; }
+        input, button { padding: 5px; margin: 5px; }
+    </style>
+</head>
+<body>
+    <div class="controls">
+        <input type="text" id="nodeContent" placeholder="New thought...">
+        <button onclick="addNode()">Add Node</button>
+        <button onclick="evolve()">Evolve Graph</button>
+        <button onclick="refresh()">Refresh</button>
+    </div>
+    <div id="graph"></div>
+
+    <script>
+        const width = window.innerWidth;
+        const height = window.innerHeight;
+
+        const svg = d3.select("#graph").append("svg")
+            .attr("width", width)
+            .attr("height", height);
+
+        let simulation = d3.forceSimulation()
+            .force("link", d3.forceLink().id(d => d.id).distance(100))
+            .force("charge", d3.forceManyBody().strength(-300))
+            .force("center", d3.forceCenter(width / 2, height / 2));
+
+        async function fetchGraph() {
+            const response = await fetch('/graph');
+            return await response.json();
+        }
+
+        async function addNode() {
+            const content = document.getElementById('nodeContent').value;
+            if (!content) return;
+            await fetch('/nodes', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({content: content})
+            });
+            document.getElementById('nodeContent').value = '';
+            refresh();
+        }
+
+        async function evolve() {
+            await fetch('/evolve', { method: 'POST' });
+            refresh();
+        }
+
+        async function refresh() {
+            const data = await fetchGraph();
+            update(data);
+        }
+
+        function update(data) {
+            svg.selectAll("*").remove(); // Simple redraw
+
+            const link = svg.append("g")
+                .selectAll("line")
+                .data(data.links)
+                .enter().append("line")
+                .attr("stroke", "#999")
+                .attr("stroke-opacity", 0.6)
+                .attr("stroke-width", d => Math.sqrt(d.weight || 1) * 2);
+
+            const node = svg.append("g")
+                .selectAll("circle")
+                .data(data.nodes)
+                .enter().append("circle")
+                .attr("r", 10)
+                .attr("fill", d => d.type === 'abstraction' ? '#ff6b6b' : '#69b3a2')
+                .call(d3.drag()
+                    .on("start", dragstarted)
+                    .on("drag", dragged)
+                    .on("end", dragended));
+
+            node.append("title")
+                .text(d => d.content);
+            
+            const labels = svg.append("g")
+                .selectAll("text")
+                .data(data.nodes)
+                .enter().append("text")
+                .text(d => d.content)
+                .attr("x", 12)
+                .attr("y", 4)
+                .attr("fill", "#ccc")
+                .style("font-size", "12px");
+
+            simulation.nodes(data.nodes).on("tick", ticked);
+            simulation.force("link").links(data.links);
+
+            function ticked() {
+                link
+                    .attr("x1", d => d.source.x)
+                    .attr("y1", d => d.source.y)
+                    .attr("x2", d => d.target.x)
+                    .attr("y2", d => d.target.y);
+
+                node
+                    .attr("cx", d => d.x)
+                    .attr("cy", d => d.y);
+                
+                labels
+                    .attr("x", d => d.x + 12)
+                    .attr("y", d => d.y + 4);
+            }
+        }
+
+        function dragstarted(event, d) {
+            if (!event.active) simulation.alphaTarget(0.3).restart();
+            d.fx = d.x;
+            d.fy = d.y;
+        }
+
+        function dragged(event, d) {
+            d.fx = event.x;
+            d.fy = event.y;
+        }
+
+        function dragended(event, d) {
+            if (!event.active) simulation.alphaTarget(0);
+            d.fx = null;
+            d.fy = null;
+        }
+
+        refresh();
+    </script>
+</body>
+</html>
